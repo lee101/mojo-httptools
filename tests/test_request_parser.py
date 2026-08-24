@@ -225,6 +225,52 @@ def test_pipelined_requests_match_upstream():
     assert actual_parser.get_http_version() == "1.0"
 
 
+@pytest.mark.parametrize(
+    "method",
+    [
+        b"GET",
+        b"PUT",
+        b"ACL",
+        b"HEAD",
+        b"POST",
+        b"COPY",
+        b"LOCK",
+        b"MOVE",
+        b"BIND",
+        b"LINK",
+        b"TRACE",
+        b"MKCOL",
+        b"MERGE",
+        b"PATCH",
+        b"PURGE",
+        b"QUERY",
+        b"DELETE",
+        b"SEARCH",
+        b"UNLOCK",
+        b"REBIND",
+        b"UNBIND",
+        b"REPORT",
+        b"NOTIFY",
+        b"UNLINK",
+        b"SOURCE",
+        b"CONNECT",
+        b"OPTIONS",
+        b"PROPFIND",
+        b"CHECKOUT",
+        b"M-SEARCH",
+        b"PROPPATCH",
+        b"SUBSCRIBE",
+        b"MKACTIVITY",
+        b"MKCALENDAR",
+        b"UNSUBSCRIBE",
+    ],
+)
+def test_packed_method_events_preserve_all_recognized_methods(method):
+    request_data = method + b" / HTTP/1.1\r\n\r\n"
+    _, parser, _ = parse(mojo_httptools.HttpRequestParser, [request_data])
+    assert parser.get_method() == method
+
+
 def test_upgrade_offset_flags_headers_and_reuse_match_upstream():
     request = (
         b"GET /chat HTTP/1.1\r\nHost: example.com\r\n"

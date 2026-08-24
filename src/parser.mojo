@@ -74,15 +74,15 @@ def is_token_char(c: UInt8) -> Bool:
     )
 
 
-def valid_method(data: BPtr, start: Int, n: Int) -> Bool:
+def method_key(data: BPtr, start: Int, n: Int) -> UInt64:
     var a = packed(data, start, min(n, 8))
     var b = UInt64(0)
     if n > 8 and n <= 16:
         b = packed(data, start + 8, n - 8)
     if n == 3:
-        return a == 5522759 or a == 5526864 or a == 4997953
+        return a if (a == 5522759 or a == 5526864 or a == 4997953) else 0
     if n == 4:
-        return (
+        return a if (
             a == 1145128264
             or a == 1414745936
             or a == 1498435395
@@ -90,18 +90,18 @@ def valid_method(data: BPtr, start: Int, n: Int) -> Bool:
             or a == 1163284301
             or a == 1145981250
             or a == 1263421772
-        )
+        ) else 0
     if n == 5:
-        return (
+        return a if (
             a == 297481097812
             or a == 327747324749
             or a == 297549317453
             or a == 310367240528
             or a == 297549321552
             or a == 383632364881
-        )
+        ) else 0
     if n == 6:
-        return (
+        return a if (
             a == 76228242195780
             or a == 79453980018003
             or a == 82752465292885
@@ -111,34 +111,45 @@ def valid_method(data: BPtr, start: Int, n: Int) -> Bool:
             or a == 98158412844878
             or a == 82799609269845
             or a == 76155446447955
-        )
+        ) else 0
     if n == 7:
-        return a == 23717862989254467 or a == 23448525506629711
+        return a if (
+            a == 23717862989254467 or a == 23448525506629711
+        ) else 0
     if n == 8:
-        return (
+        return a if (
             a == 4921952009106444880
             or a == 6076850456876107843
             or a == 5207096034459856205
-        )
+        ) else 0
     if n == 9:
-        return (
+        return a if (
             (a == 4851574511785431632 and b == 72)
             or (a == 4776439328916264275 and b == 69)
-        )
+        ) else 0
     if n == 10:
-        return (
+        return a if (
             (a == 5284491839020288845 and b == 22868)
             or (a == 4921947636577291085 and b == 21057)
-        )
+        ) else 0
     if n == 11:
-        return a == 5927673078914174549 and b == 4538953
-    return False
+        return a if (a == 5927673078914174549 and b == 4538953) else 0
+    return 0
 
 
 def find_line_end(data: BPtr, start: Int, n: Int) -> Int:
     comptime W = simd_width_of[DType.float64]()
     comptime BYTE_W = W * 8
     var i = start
+    var prefix_end = min(n, start + BYTE_W)
+    while i < prefix_end:
+        if data[i] == UInt8(10):
+            if i == start or data[i - 1] != UInt8(13):
+                return -2
+            return i - 1
+        if data[i] == UInt8(13) and i + 1 < n and data[i + 1] != UInt8(10):
+            return -2
+        i += 1
     while i + BYTE_W <= n:
         var chars = data.load[width=BYTE_W](i)
         var special = chars.eq(UInt8(10)) | chars.eq(UInt8(13))
@@ -289,7 +300,7 @@ def process_header(
             return -1
 
     var name_len = colon - start
-    if equals_lower(
+    if name_len == 14 and equals_lower(
         data, start, name_len, 3275364211029340003, 114849160783212
     ):
         var length = parse_decimal(data, value_start, value_end)
@@ -309,14 +320,18 @@ def process_header(
         ):
             return -3
         state[7] |= 2
-    elif equals_lower(data, start, name_len, 7598807758576447331, 28271):
+    elif name_len == 10 and equals_lower(
+        data, start, name_len, 7598807758576447331, 28271
+    ):
         if csv_has_token(data, value_start, value_end, 435728378979, 0):
             state[7] |= 4
         if csv_has_token(data, value_start, value_end, 7596553519254300011, 25974):
             state[7] |= 8
         if csv_has_token(data, value_start, value_end, 28539342341763189, 0):
             state[7] |= 16
-    elif equals_lower(data, start, name_len, 28539342341763189, 0):
+    elif name_len == 7 and equals_lower(
+        data, start, name_len, 28539342341763189, 0
+    ):
         if value_end > value_start:
             state[7] |= 32
 
@@ -364,9 +379,9 @@ def mht_parse_request(
                 var first_space = pos
                 while first_space < n and data[first_space] != UInt8(32):
                     first_space += 1
-                if first_space < n and not valid_method(
+                if first_space < n and method_key(
                     data, pos, first_space - pos
-                ):
+                ) == 0:
                     return fail(state, pos, 2, 2)
                 if first_space < n and n - first_space - 1 >= 5 and equals_ascii(
                     data, first_space + 1, 5, 203211166792, 0
@@ -377,9 +392,8 @@ def mht_parse_request(
             var first_space = pos
             while first_space < end and data[first_space] != UInt8(32):
                 first_space += 1
-            if first_space == end or not valid_method(
-                data, pos, first_space - pos
-            ):
+            var request_method = method_key(data, pos, first_space - pos)
+            if first_space == end or request_method == 0:
                 return fail(state, pos, 2, 2)
             var second_space = first_space + 1
             while second_space < end and data[second_space] != UInt8(32):
@@ -412,13 +426,13 @@ def mht_parse_request(
             state[4] = Int(data[version_start + 7]) - 48
             state[6] = 0
             state[7] = 0
-            if equals_ascii(data, pos, first_space - pos, 23717862989254467, 0):
+            if request_method == 23717862989254467:
                 state[7] |= 64
             count = emit(
                 events,
                 count,
                 1 + state[3] * 256 + state[4] * 65536,
-                pos,
+                Int(request_method),
                 first_space - pos,
                 first_space + 1,
                 second_space - first_space - 1,

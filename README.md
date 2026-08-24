@@ -107,15 +107,19 @@ and consumed byte count. It writes compact five-word event records containing
 only a tagged kind and byte offsets. Common completion sequences share one
 record, and large pipelines drain through bounded batches rather than
 allocating an event array proportional to the input. Python unpacks each batch
-in C and slices the original contiguous byte buffer into callback arguments,
-so no Python object or callback crosses into Mojo.
+in C and slices the original contiguous byte buffer into callback arguments.
+Immutable `bytes` inputs use their slices directly, and method events use a
+packed identifier to reuse constant method objects, so no Python object or
+callback crosses into Mojo and one method allocation per request is avoided.
 
 Completed bytes are discarded after every feed. Only an incomplete request
 line, header line, chunk delimiter, or body tail is retained between calls.
 For an immutable `bytes` feed with no pending fragment, ctypes points directly
 at Python's byte storage. Contiguous NumPy arrays and other writable buffer
-inputs also cross the FFI boundary without a copy. Line-ending searches scan
-full native SIMD blocks and finish with a bounded scalar tail.
+inputs also cross the FFI boundary without a copy. Line-ending searches keep
+one native-width prefix scalar to avoid SIMD setup overhead on typical short
+HTTP lines, then scan full native SIMD blocks and finish with a bounded scalar
+tail.
 
 ## Tests
 
@@ -124,7 +128,7 @@ pixi run build
 pixi run test
 ```
 
-The 56-test suite compares callback sequences, metadata, upgrade offsets,
+The 91-test suite compares callback sequences, metadata, upgrade offsets,
 fragmentation, bodies, chunks, trailers, pipelining, keep-alive behavior, input
 buffer types, error categories, and callback exception chaining against real
 `httptools` 0.8.0. It also covers byte-at-a-time input, strict framing, SIMD
@@ -145,16 +149,18 @@ value below 1 means the Mojo port is slower.
 
 | workload | mojo-httptools | httptools 0.8 | speedup |
 |---|---:|---:|---:|
-| 100k pipelined GET requests | 350.77 ms | 109.48 ms | 0.31x |
-| 50k pipelined POST requests | 244.69 ms | 80.07 ms | 0.33x |
-| single POST, 16 MiB body | 2.32 ms | 2.24 ms | 0.97x |
-| chunked POST, 8 MiB / 2048 chunks | 3.66 ms | 2.11 ms | 0.58x |
-| 20k separate `feed_data` calls | 128.69 ms | 23.41 ms | 0.18x |
+| 100k pipelined GET requests | 240.98 ms | 109.36 ms | 0.45x |
+| 50k pipelined POST requests | 175.83 ms | 80.18 ms | 0.46x |
+| single POST, 16 MiB body | 1.37 ms | 1.16 ms | 0.84x |
+| chunked POST, 8 MiB / 2048 chunks | 2.12 ms | 1.22 ms | 0.57x |
+| 20k separate `feed_data` calls | 110.44 ms | 23.35 ms | 0.21x |
 
-Upstream remains faster on every measured case, but the fixed-body workload is
-near parity and the Mojo times improved substantially. The remaining gap on
-small and fragmented requests includes ordered Python callback and FFI dispatch
-around a mature llhttp implementation.
+Upstream remains faster on every measured case. Relative to the optimization
+baseline from the same machine, the pipelined, chunked, and fragmented Mojo
+times improved; the 16 MiB fixed-body case moved from 1.34 ms to 1.37 ms and is
+reported as a small regression. The remaining gap on small and fragmented
+requests includes ordered Python callback and FFI dispatch around a mature
+llhttp implementation.
 
 There is intentionally no parallel or GPU parser path. HTTP parsing updates one
 ordered state machine and callbacks must retain wire order, so requests within

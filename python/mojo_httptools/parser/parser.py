@@ -43,6 +43,46 @@ _ERROR_MESSAGES = {
 _EVENT_CAPACITY = 8192
 _EVENT_STRUCT = struct.Struct("=5q")
 _INT64_MAX = (1 << 63) - 1
+_METHODS = {
+    int.from_bytes(name[:8], "little"): name
+    for name in (
+        b"GET",
+        b"PUT",
+        b"ACL",
+        b"HEAD",
+        b"POST",
+        b"COPY",
+        b"LOCK",
+        b"MOVE",
+        b"BIND",
+        b"LINK",
+        b"TRACE",
+        b"MKCOL",
+        b"MERGE",
+        b"PATCH",
+        b"PURGE",
+        b"QUERY",
+        b"DELETE",
+        b"SEARCH",
+        b"UNLOCK",
+        b"REBIND",
+        b"UNBIND",
+        b"REPORT",
+        b"NOTIFY",
+        b"UNLINK",
+        b"SOURCE",
+        b"CONNECT",
+        b"OPTIONS",
+        b"PROPFIND",
+        b"CHECKOUT",
+        b"M-SEARCH",
+        b"PROPPATCH",
+        b"SUBSCRIBE",
+        b"MKACTIVITY",
+        b"MKCALENDAR",
+        b"UNSUBSCRIBE",
+    )
+}
 _PY_BYTES_AS_STRING = ctypes.pythonapi.PyBytes_AsString
 _PY_BYTES_AS_STRING.argtypes = [ctypes.py_object]
 _PY_BYTES_AS_STRING.restype = ctypes.c_void_p
@@ -196,6 +236,7 @@ class HttpRequestParser:
             on_chunk_complete,
         ) = self._callbacks
         parse_request = self._parse_request
+        byte_snapshot = snapshot if isinstance(snapshot, bytes) else None
         state_address = self._state_address
         events_address = self._events_address
         consumed_total = 0
@@ -229,9 +270,8 @@ class HttpRequestParser:
                     if kind == 1:
                         e = (tag >> 8) & 255
                         f = (tag >> 16) & 255
-                        a += consumed_total
                         c += consumed_total
-                        self._method = bytes(snapshot[a : a + b])
+                        self._method = _METHODS[a]
                         self._http_major, self._http_minor = e, f
                         self._upgrade = False
                         if on_message_begin is not None:
@@ -239,16 +279,25 @@ class HttpRequestParser:
                             on_message_begin()
                         if on_url is not None:
                             callback_name = _CALLBACKS[1]
-                            on_url(bytes(snapshot[c : c + d]))
+                            if byte_snapshot is not None:
+                                on_url(byte_snapshot[c : c + d])
+                            else:
+                                on_url(bytes(snapshot[c : c + d]))
                     elif kind == 2:
                         a += consumed_total
                         c += consumed_total
                         if on_header is not None:
                             callback_name = _CALLBACKS[2]
-                            on_header(
-                                bytes(snapshot[a : a + b]),
-                                bytes(snapshot[c : c + d]),
-                            )
+                            if byte_snapshot is not None:
+                                on_header(
+                                    byte_snapshot[a : a + b],
+                                    byte_snapshot[c : c + d],
+                                )
+                            else:
+                                on_header(
+                                    bytes(snapshot[a : a + b]),
+                                    bytes(snapshot[c : c + d]),
+                                )
                     elif kind == 3:
                         self._keep_alive = bool(a)
                         self._upgrade = bool(b)
@@ -259,7 +308,10 @@ class HttpRequestParser:
                         a += consumed_total
                         if on_body is not None:
                             callback_name = _CALLBACKS[4]
-                            on_body(bytes(snapshot[a : a + b]))
+                            if byte_snapshot is not None:
+                                on_body(byte_snapshot[a : a + b])
+                            else:
+                                on_body(bytes(snapshot[a : a + b]))
                     elif kind == 5:
                         if on_chunk_header is not None:
                             callback_name = _CALLBACKS[6]
@@ -298,7 +350,10 @@ class HttpRequestParser:
                             on_headers_complete()
                         if on_body is not None:
                             callback_name = _CALLBACKS[4]
-                            on_body(bytes(snapshot[a : a + b]))
+                            if byte_snapshot is not None:
+                                on_body(byte_snapshot[a : a + b])
+                            else:
+                                on_body(bytes(snapshot[a : a + b]))
                         if on_message_complete is not None:
                             callback_name = _CALLBACKS[5]
                             on_message_complete()
@@ -309,7 +364,10 @@ class HttpRequestParser:
                         a += consumed_total
                         if on_body is not None:
                             callback_name = _CALLBACKS[4]
-                            on_body(bytes(snapshot[a : a + b]))
+                            if byte_snapshot is not None:
+                                on_body(byte_snapshot[a : a + b])
+                            else:
+                                on_body(bytes(snapshot[a : a + b]))
                         if on_message_complete is not None:
                             callback_name = _CALLBACKS[5]
                             on_message_complete()
@@ -323,7 +381,10 @@ class HttpRequestParser:
                             on_chunk_header()
                         if on_body is not None:
                             callback_name = _CALLBACKS[4]
-                            on_body(bytes(snapshot[a : a + b]))
+                            if byte_snapshot is not None:
+                                on_body(byte_snapshot[a : a + b])
+                            else:
+                                on_body(bytes(snapshot[a : a + b]))
                         if on_chunk_complete is not None:
                             callback_name = _CALLBACKS[7]
                             on_chunk_complete()
