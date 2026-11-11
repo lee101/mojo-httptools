@@ -151,7 +151,7 @@ def find_line_end(data: BPtr, start: Int, n: Int) -> Int:
             return -2
         i += 1
     while i + BYTE_W <= n:
-        var chars = data.load[width=BYTE_W](i)
+        var chars = data.unsafe_load[width=BYTE_W](i)
         var special = chars.eq(UInt8(10)) | chars.eq(UInt8(13))
         if special.reduce_or():
             break
